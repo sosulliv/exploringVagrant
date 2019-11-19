@@ -1,0 +1,111 @@
+
+## #######################################################################################
+#template names
+varManagerServer = "buildtemplatemanager"
+varTemplateNode =  "buildtemplatenode"
+varReportTemplate = "buildtemplatereport"
+
+
+## #######################################################################################
+#node defintions 
+
+
+build_nodes = [
+	{ :host => "#{varManagerServer}", :ip => "", :box => "centos/7", :ram => 4048, :cpu => 2, :gui => false },
+	{ :host => "#{varTemplateNode}", :ip => "", :box => "centos/7", :ram => 2048, :cpu => 2, :gui => false },
+	{ :host => "#{varReportTemplate}", :ip => "", :box => "centos/7", :ram => 4048, :cpu => 2, :gui => false },
+]
+
+
+varDomain = "internal"
+
+## #######################################################################################
+#write the host file
+
+varHostEntries = ""
+build_nodes.each do |build_node|
+	varHostEntries << "#{build_node[:ip]} #{build_node[:host]}.#{varDomain} #{build_node[:host]}\n"
+end
+
+puts varHostEntries
+
+$etchosts = <<SCRIPT
+#!/bin/bash
+cat > /etc/hosts <<EOF
+127.0.0.1       localhost
+10.10.45.1      host.#{varDomain} host
+#{varHostEntries}
+EOF
+SCRIPT
+
+## #######################################################################################
+#Define Directory of shared repository
+
+varRepository  =  '/Users/sosulliv/vagrantprojects/repository/'
+puts "Current Vagrant Repository: " + varRepository
+
+
+## #######################################################################################
+
+
+Vagrant.configure("2") do |config|
+
+    config.hostmanager.enabled = true
+    config.hostmanager.manage_host = true
+    config.hostmanager.manage_guest = false
+    config.hostmanager.ignore_private_ip = false
+    config.hostmanager.include_offline = true
+ 
+	build_nodes.each do |build_node|
+
+		config.vm.define build_node[:host] do |build_config|
+
+			build_config.vm.box = build_node[:box]
+
+			build_config.vm.network "private_network", ip: build_node[:ip], :netmask => "255.255.255.0"
+			build_config.vm.hostname = "#{build_node[:host]}.#{varDomain}"
+			# build_config.vm.hostname = build_node[:host] + "." + varDomain
+
+		    build_config.hostmanager.aliases = "#{build_node[:host]}"
+
+			build_config.vm.provider :virtualbox do |v|
+				v.name = build_node[:host].to_s
+				v.gui = build_node[:gui]
+
+				v.customize ["modifyvm", :id, "--memory", build_node[:ram].to_s ]
+				v.customize ["modifyvm", :id, "--cpus", build_node[:cpu].to_s ]
+			end
+
+			build_config.vm.synced_folder varRepository, "/repository", 
+				id: "repository",
+				owner: "vagrant",
+				group: "vagrant"
+
+
+		    if build_node[:host] == varManagerServer
+		    	build_config.vm.provision :shell, :inline => $etchosts
+		    	build_config.vm.provision :shell, :path => "os-tuning/provision_for_os.sh"
+				build_config.vm.provision :shell, :path => "os-tuning/provision_for_os_settingscentos7.sh"
+		        build_config.vm.provision :shell, :path => "repository-tools/provisonambarimaster.sh"
+				puts "master"
+
+			elsif build_node[:host] == varTemplateNode
+				build_config.vm.provision :shell, :inline => $etchosts
+				build_config.vm.provision :shell, :path => "os-tuning/provision_for_os.sh"
+				build_config.vm.provision :shell, :path => "os-tuning/provision_for_os_settingscentos7.sh"
+				build_config.vm.provision :shell, :path => "repository-tools/provisionambarinode.sh"
+				puts "node"
+
+			elsif build_node[:host] == varReportTemplate
+				build_config.vm.provision :shell, :inline => $etchosts
+			    #build_config.vm.provision :shell, :path => "os-tuning/provision_for_os.sh"
+				#build_config.vm.provision :shell, :path => "os-tuning/provision_for_os_settingscentos7.sh"
+				#build_config.vm.provision :shell, :path => "repository-tools/buildslamdata.sh"
+				puts "report server"
+			end
+
+
+		end
+	end	
+	
+end
